@@ -69,4 +69,36 @@ void WebOS_ReopenGamepads(void) {
 		}
 	}
 }
+
+/* SDL does NOT normalize axis polarity: SDL_CONTROLLER_AXIS_* carries the raw
+   evdev value, sign and all, and gamecontrollerdb entries only pick *which*
+   raw axis feeds each semantic axis. On the webOS SDL fork (with the evdev
+   joystick driver forced via SDL_HINT_JOYSTICK_HIDAPI=0) both sticks' Y axes
+   come out with opposite polarity to desktop SDL (up = positive), so the
+   stock -y / PAD_AXIS_SCALE in ProcessJoystick maps "push up" to "walk/aim
+   backwards". Flip the signs back.
+
+   The right stick drives the camera. Its look pipeline (Camera.c) is tuned for
+   mouse pixel deltas, so a stick value that maxes out at 1.0 turns the view
+   far too slowly (~5 deg/s at full deflection) — the sensitivity boost below
+   puts it in the same ballpark as mouse movement. The in-game Sensitivity
+   option still scales it on top.
+
+   TODO(settings): expose these per-stick sign/sensitivity values as Options so
+   they can be tuned from the menu instead of requiring a rebuild. */
+#define WEBOS_LEFT_Y_FLIP   (-1.0f)
+#define WEBOS_LEFT_X_SCALE  ( 1.0f)
+#define WEBOS_RIGHT_Y_FLIP  (-1.0f)
+#define WEBOS_RIGHT_X_SCALE (10.0f)
+#define WEBOS_RIGHT_Y_SCALE (10.0f)
+
+void WebOS_NormalizeGamepadAxis(int axis, float* ax, float* ay) {
+	if (axis == PAD_AXIS_LEFT) {
+		*ax *= WEBOS_LEFT_X_SCALE;
+		*ay *= WEBOS_LEFT_Y_FLIP;
+	} else {
+		*ax *= WEBOS_RIGHT_X_SCALE;
+		*ay *= WEBOS_RIGHT_Y_FLIP * WEBOS_RIGHT_Y_SCALE;
+	}
+}
 #endif

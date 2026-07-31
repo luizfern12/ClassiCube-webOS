@@ -503,10 +503,18 @@ static void ProcessGamepadButtons(int port, SDL_GameController* gp) {
 	Gamepad_SetButton(port, CCPAD_3, SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_X));
 	Gamepad_SetButton(port, CCPAD_4, SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_Y));
 
+	Gamepad_SetButton(port, CCPAD_L,  SDL_GameControllerGetAxis(  gp, SDL_CONTROLLER_AXIS_TRIGGERLEFT ) > 8000);
+	Gamepad_SetButton(port, CCPAD_R,  SDL_GameControllerGetAxis(  gp, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 8000);
+#ifdef CC_BUILD_WEBOS
+	/* webOS: swap shoulder/trigger roles so physical L1/R1 bumpers drive the
+	   hotbar (CCPAD_ZL/ZR) and L2/R2 triggers drive delete/place (CCPAD_L/R),
+	   matching the original pad mapping instead of the upstream default. */
+	Gamepad_SetButton(port, CCPAD_ZL, SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_LEFTSHOULDER));
+	Gamepad_SetButton(port, CCPAD_ZR, SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER));
+#else
 	Gamepad_SetButton(port, CCPAD_ZL, SDL_GameControllerGetAxis(  gp, SDL_CONTROLLER_AXIS_TRIGGERLEFT ) > 8000);
 	Gamepad_SetButton(port, CCPAD_ZR, SDL_GameControllerGetAxis(  gp, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 8000);
-	Gamepad_SetButton(port, CCPAD_L,  SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_LEFTSHOULDER));
-	Gamepad_SetButton(port, CCPAD_R,  SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER));
+#endif
 
 	Gamepad_SetButton(port, CCPAD_SELECT, SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_GUIDE));
 	Gamepad_SetButton(port, CCPAD_START,  SDL_GameControllerGetButton(gp, SDL_CONTROLLER_BUTTON_START));
@@ -527,8 +535,13 @@ static void ProcessJoystick(int port, SDL_GameController* gp, int axis, float de
 	// May not be exactly 0 on actual hardware
 	if (Math_AbsI(x) <= 1024) x = 0;
 	if (Math_AbsI(y) <= 1024) y = 0;
-	
-	Gamepad_SetAxis(port, axis, x / PAD_AXIS_SCALE, -y / PAD_AXIS_SCALE, delta);
+
+	float ax = x / PAD_AXIS_SCALE;
+	float ay = -y / PAD_AXIS_SCALE;
+#ifdef CC_BUILD_WEBOS
+	WebOS_NormalizeGamepadAxis(axis, &ax, &ay);
+#endif
+	Gamepad_SetAxis(port, axis, ax, ay, delta);
 }
 
 void Gamepads_Process(float delta) {

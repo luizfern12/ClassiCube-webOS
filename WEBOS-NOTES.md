@@ -105,6 +105,11 @@
 - ClassiCube `src/psvita/Platform_PSVita.c`: `Platform_EncodePath` root-path prefix pattern.
 
 ## Gamepad / SDL controller mappings (confirmed on tv-sala)
+- See `WEBOS-INPUT-NOTES.md` for how RetroArch handles webOS input (reference
+  for ClassiCube) and the ClassiCube webOS gamepad pipeline.
+- `WebOS_NormalizeGamepadAxis` (`src/webos/Window_WebOS.c`) applies webOS-only
+  sign/sensitivity fixes per stick (left Y flip, right-stick look boost).
+  Hardcoded for now; TODO to expose as Options.
 - The webOS SDL reports device GUIDs that embed the device-name CRC (`03008fe5...` PS4,
   `03007755...` Switch Pro) instead of the stock SDL GUID scheme, so standard
   gamecontrollerdb.txt GUID entries never match; entries for these devices MUST use the

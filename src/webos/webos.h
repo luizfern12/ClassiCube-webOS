@@ -13,6 +13,7 @@ void WebOS_PreSDLInit(void);
 void WebOS_ApplyWindowSize(int* width, int* height, int* flags);
 void WebOS_LoadGamepadMappings(void);
 void WebOS_ReopenGamepads(void);
+void WebOS_NormalizeGamepadAxis(int axis, float* ax, float* ay);
 
 #endif
 #endif
