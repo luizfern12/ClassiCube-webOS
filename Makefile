@@ -1,4 +1,4 @@
-.PHONY: clean run
+.PHONY: clean run webos
 
 
 ifeq ($(OS),Windows_NT)
@@ -48,6 +48,8 @@ web:
 	$(call make_platform,misc/makefiles/web.mk)
 linux:
 	$(call make_platform,misc/makefiles/linux.mk)
+webos:
+	$(call make_platform,misc/makefiles/webos.mk)
 windows:
 	$(call make_platform,misc/makefiles/windows.mk)
 sunos:

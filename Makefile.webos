@@ -1,0 +1,40 @@
+# Makefile.webos for ClassiCube on LG Smart TV (webOS)
+# Cross-compiles with the arm-webos-linux-gnueabi toolchain and
+# packages the result into a webOS .ipk (via ares-package).
+
+SDK_DIR ?= /run/media/1TB/Dev-Projects/Porting/Tools/native-toolchain-compiled/arm-webos-linux-gnueabi_sdk-buildroot
+STAGING_DIR ?= $(SDK_DIR)/arm-webos-linux-gnueabi/sysroot
+
+ARES_DIR ?= /run/media/1TB/Dev-Projects/Porting/Tools/ares-cli-rs-v0.2.0-linux-x86_64
+APP_PACKAGE_NAME ?= com.classicube.webos
+IPK_VERSION ?= 1.0.0
+
+# Bundled webosbrew SDL2 (2.30.12) — override with your own prebuilt if needed
+SDL2_LIB ?= /run/media/1TB/Dev-Projects/Porting/Tools/precompiled-SDL/lib/libSDL2-2.0.so.0
+
+export PATH := $(SDK_DIR)/bin:$(PATH)
+export STAGING_DIR := $(STAGING_DIR)
+
+all: build-webos ipk
+
+clean:
+	rm -rf build/webos webos/dist webos/*.ipk ClassiCube
+
+build-webos:
+	$(MAKE) -f Makefile webos
+	# Force a real DT_RPATH so the bundled libSDL2 wins over the jailer's
+	# LD_LIBRARY_PATH (glibc searches RPATH before LD_LIBRARY_PATH).
+	patchelf --force-rpath --set-rpath '$$ORIGIN/lib' ClassiCube
+
+ipk:
+	rm -rf webos/dist
+	mkdir -p webos/dist/lib
+	cp webos/appinfo.json webos/dist/appinfo.json
+	cp webos/icon160.png webos/dist/icon160.png
+	cp webos/gamecontrollerdb.txt webos/dist/gamecontrollerdb.txt
+	cp ClassiCube webos/dist/ClassiCube
+	cp -t webos/dist/lib -vf $(SDL2_LIB)
+	$(ARES_DIR)/ares-package webos/dist -o webos/
+	@echo "Package created successfully in webos/ directory!"
+
+.PHONY: all build-webos ipk clean

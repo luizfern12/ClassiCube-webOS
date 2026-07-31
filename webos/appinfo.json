@@ -1,0 +1,14 @@
+{
+    "id": "com.classicube.webos",
+    "version": "1.0.0",
+    "vendor": "ClassiCube",
+    "title": "ClassiCube",
+    "icon": "icon160.png",
+    "main": "ClassiCube",
+    "iconColor": "#00a8a8",
+    "type": "native",
+    "appDescription": "Minecraft Classic compatible game client for webOS",
+    "cloudgame_active": true,
+    "useAllMouseButtons": true,
+    "useAllKeyboardKeys": true
+}

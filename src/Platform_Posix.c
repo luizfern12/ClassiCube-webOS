@@ -31,6 +31,10 @@
 #include <sys/time.h>
 #include <netdb.h>
 
+#ifdef CC_BUILD_WEBOS
+#include <SDL2/SDL.h>
+#endif
+
 const cc_result ReturnCode_FileShareViolation = 1000000000; /* TODO: not used apparently */
 const cc_result ReturnCode_FileNotFound     = ENOENT;
 const cc_result ReturnCode_PathNotFound     = 99999;
@@ -98,8 +102,193 @@ cc_bool  Platform_ReadonlyFilesystem;
 #else
 #include "main_impl.h"
 
+/*########################################################################################################################*
+*-----------------------------------------------------webOS bootstrap-----------------------------------------------------*
+*#########################################################################################################################*/
+#ifdef CC_BUILD_WEBOS
+/* 8BitDo controllers in Switch mode emulate the Nintendo Switch Pro Controller
+   (VID 0x057e, PID 0x2009) and, over USB, sit in a "charging" HID state until a
+   host sends the Switch Pro handshake. SDL's hidapi driver is disabled on webOS
+   (the jailer blocks /dev/hidraw for it), so send the handshake directly so the
+   pad becomes active before we read it over evdev. */
+struct hidraw_devinfo {
+	unsigned int bustype;
+	short vendor;
+	short product;
+};
+#define HIDIOCGRAWINFO _IOR('H', 0x03, struct hidraw_devinfo)
+
+static void WebOS_SwitchProHandshake(void) {
+	struct stat st;
+	struct hidraw_devinfo info;
+	int fd, i, gone = 0;
+	const unsigned char cmd[] = { 0x80, 0x02 };
+
+	printf("--- Switch Pro handshake ---" _NL);
+	for (i = 0; i < 32; i++) {
+		char path[64];
+		snprintf(path, sizeof(path), "/dev/hidraw%d", i);
+		/* webOS pre-creates all /dev/hidrawN nodes, so skip the rest once
+		   several in a row fail to open with ENODEV */
+		if (stat(path, &st) != 0 || (fd = open(path, O_RDWR | O_NONBLOCK)) < 0) {
+			if (errno == ENOENT || ++gone >= 2) break;
+			continue;
+		}
+		gone = 0;
+
+		if (ioctl(fd, HIDIOCGRAWINFO, &info) != 0) {
+			printf("%s: HIDIOCGRAWINFO failed: %s" _NL, path, strerror(errno));
+			close(fd); continue;
+		}
+		printf("%s: bus=%u vid=%04x pid=%04x" _NL, path, info.bustype, info.vendor, info.product);
+		if (info.vendor != 0x057e || info.product != 0x2009) { close(fd); continue; }
+
+		ssize_t n = write(fd, cmd, sizeof(cmd));
+		printf("%s: wrote handshake: %zd (%s)" _NL, path, n, n >= 0 ? "ok" : strerror(errno));
+		close(fd);
+	}
+}
+
+static void WebOS_DumpJoysticks(const char* label) {
+	SDL_version sv;
+	SDL_GameController* gc;
+	SDL_Joystick* js;
+	SDL_JoystickGUID g;
+	char guid[33];
+	char* map;
+	int n, i;
+
+	SDL_GetVersion(&sv);
+	printf("%s: SDL %u.%u.%u, NumJoysticks: %d" _NL, label, sv.major, sv.minor, sv.patch, (n = SDL_NumJoysticks()));
+	for (i = 0; i < n; i++) {
+		const char* name = SDL_JoystickNameForIndex(i);
+		printf("  [%d] name='%s' isGameController=%d" _NL, i, name ? name : "(null)", SDL_IsGameController(i));
+		js = SDL_JoystickOpen(i);
+		if (js) {
+			g = SDL_JoystickGetDeviceGUID(i);
+			SDL_JoystickGetGUIDString(g, guid, sizeof(guid));
+			printf("      guid=%s axes=%d buttons=%d balls=%d hats=%d" _NL,
+				guid, SDL_JoystickNumAxes(js), SDL_JoystickNumButtons(js),
+				SDL_JoystickNumBalls(js), SDL_JoystickNumHats(js));
+			SDL_JoystickClose(js);
+		}
+		if (SDL_IsGameController(i)) {
+			map = SDL_GameControllerMappingForGUID(SDL_JoystickGetDeviceGUID(i));
+			printf("      mapping: %s" _NL, map ? map : "(none)");
+			if (map) SDL_free(map);
+		}
+	}
+
+	gc = NULL;
+	for (i = 0; i < SDL_NumJoysticks(); i++) {
+		if (!SDL_IsGameController(i)) continue;
+		gc = SDL_GameControllerOpen(i);
+		if (gc) break;
+	}
+	if (gc) {
+		printf("--- live read controller [%d] (%s) for 4s, press buttons ---" _NL,
+			i, SDL_GameControllerName(gc) ? SDL_GameControllerName(gc) : "?");
+		cc_uint32 t0 = SDL_GetTicks();
+		while (SDL_GetTicks() - t0 < 4000) {
+			int a, b;
+			SDL_GameControllerUpdate();
+			for (a = 0; a < SDL_CONTROLLER_AXIS_MAX; a++) {
+				int16_t v = SDL_GameControllerGetAxis(gc, a);
+				if (v > 4000 || v < -4000) printf("  axis %d = %d" _NL, a, v);
+			}
+			for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++)
+				if (SDL_GameControllerGetButton(gc, b)) printf("  button %d pressed" _NL, b);
+			SDL_Delay(16);
+		}
+		SDL_GameControllerClose(gc);
+	}
+	printf("=== probe done ===" _NL);
+}
+
+/* Marker-triggered debug tool: prints input devices and SDL joystick info */
+static void WebOS_ProbeJoysticks(void) {
+	struct dirent* ent;
+	DIR* dir;
+	FILE* f;
+	char buf[512];
+
+	printf("=== ClassiCube joystick probe ===" _NL);
+	printf("--- /dev/input listing ---" _NL);
+	dir = opendir("/dev/input");
+	if (dir) {
+		while ((ent = readdir(dir)) != NULL) {
+			if (ent->d_name[0] == '.') continue;
+			printf("/dev/input/%s" _NL, ent->d_name);
+		}
+		closedir(dir);
+	} else { printf("opendir(/dev/input) failed: %s" _NL, strerror(errno)); }
+
+	printf("--- /proc/bus/input/devices ---" _NL);
+	f = fopen("/proc/bus/input/devices", "r");
+	if (f) {
+		while (fgets(buf, sizeof(buf), f)) printf("%s", buf);
+		fclose(f);
+	} else { printf("open /proc/bus/input/devices failed: %s" _NL, strerror(errno)); }
+
+	WebOS_DumpJoysticks("default");
+
+	SDL_SetHint("SDL_HINT_JOYSTICK_HIDAPI", "0");
+	SDL_Quit();
+	if (SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0)
+		printf("SDL GAMECONTROLLER re-init failed: %s" _NL, SDL_GetError());
+	WebOS_DumpJoysticks("HIDAPI=0");
+
+	SDL_Quit();
+	exit(0);
+}
+
+static void WebOS_Bootstrap(void) {
+	struct stat st;
+	char sockpath[256];
+	const char* runtime_dir;
+	const char* logfile;
+
+	if (!getenv("EGL_PLATFORM")) setenv("EGL_PLATFORM", "wayland", 0);
+	if (!getenv("XDG_RUNTIME_DIR")) setenv("XDG_RUNTIME_DIR", "/tmp/xdg", 0);
+	mkdir("/tmp/xdg", 0700);
+
+	logfile = getenv("CC_LOG_FILE");
+	if (!logfile) logfile = "client.log";
+	freopen(logfile, "a", stdout);
+	freopen(logfile, "a", stderr);
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	printf("logging to '%s'" _NL, logfile);
+
+	runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (runtime_dir && runtime_dir[0]) {
+		snprintf(sockpath, sizeof(sockpath), "%s/wayland-0", runtime_dir);
+		if (stat(sockpath, &st) != 0) {
+			/* Try to find the wayland socket and symlink it into XDG_RUNTIME_DIR */
+			static const char* candidates[] = {
+				"/run/wayland-0", "/var/run/wayland-0",
+				"/run/user/0/wayland-0", "/tmp/wayland-0", NULL
+			};
+			int i;
+			for (i = 0; candidates[i]; i++) {
+				if (stat(candidates[i], &st) != 0 || !S_ISSOCK(st.st_mode)) continue;
+				if (symlink(candidates[i], sockpath) == 0)
+					printf("wayland socket: linked %s -> %s" _NL, candidates[i], sockpath);
+				break;
+			}
+		}
+	}
+
+	WebOS_SwitchProHandshake();
+
+	if (access("cc_probe_joy", F_OK) == 0) WebOS_ProbeJoysticks();
+}
+#endif
+
 int main(int argc, char** argv) {
 	cc_result res;
+#ifdef CC_BUILD_WEBOS
+	WebOS_Bootstrap();
+#endif
 	SetupProgram(argc, argv);
 
 	/* If single process mode, then the loop is launcher -> game -> launcher etc */

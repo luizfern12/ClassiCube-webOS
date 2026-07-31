@@ -224,3 +224,7 @@ UpgradeLog*.htm
 # Eclipse
 .cproject
 .project
+
+# webOS packaging artifacts
+webos/dist/
+webos/*.ipk
