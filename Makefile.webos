@@ -26,7 +26,7 @@ build-webos:
 	# LD_LIBRARY_PATH (glibc searches RPATH before LD_LIBRARY_PATH).
 	patchelf --force-rpath --set-rpath '$$ORIGIN/lib' ClassiCube
 
-ipk:
+ipk: build-webos
 	rm -rf webos/dist
 	mkdir -p webos/dist/lib
 	cp webos/appinfo.json webos/dist/appinfo.json

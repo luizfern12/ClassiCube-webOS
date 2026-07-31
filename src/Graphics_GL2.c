@@ -562,6 +562,11 @@ static void GLBackend_Init(void) {
 
 	Platform_Log2("BGRA support - Ext: %t, Apple: %t", &has_ext_bgra, &has_apl_bgra);
 	convert_rgba = PIXEL_FORMAT != GL_RGBA && !has_ext_bgra && !has_apl_bgra && !has_sym_bgra;
+#if defined CC_BUILD_WEBOS
+	/* webOS GLES drivers are strict about internalformat != format, so always
+	   upload via CPU-swizzled GL_RGBA to avoid black textures */
+	convert_rgba = true;
+#endif
 #else
     customMipmapsLevels = true;
     const GLubyte* ver  = glGetString(GL_VERSION);

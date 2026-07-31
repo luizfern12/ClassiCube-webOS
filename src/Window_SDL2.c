@@ -529,6 +529,11 @@ static void Gamepads_ReopenPads(void) {
 }
 
 void Gamepads_Init(void) {
+#ifdef CC_BUILD_WEBOS
+	/* Extra mappings for pads not in the bundled SDL's built-in database.
+	   Runs after the cwd has been switched to the app dir. */
+	SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt");
+#endif
 	Gamepads_ReopenPads();
 }
 

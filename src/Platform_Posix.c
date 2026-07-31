@@ -230,23 +230,51 @@ static void WebOS_ProbeJoysticks(void) {
 		fclose(f);
 	} else { printf("open /proc/bus/input/devices failed: %s" _NL, strerror(errno)); }
 
-	WebOS_DumpJoysticks("default");
-
+	/* The real app sets HIDAPI=0 in Window_PreInit before SDL_Init; mirror that */
 	SDL_SetHint("SDL_HINT_JOYSTICK_HIDAPI", "0");
-	SDL_Quit();
-	if (SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0)
-		printf("SDL GAMECONTROLLER re-init failed: %s" _NL, SDL_GetError());
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0)
+		printf("SDL init failed: %s" _NL, SDL_GetError());
 	WebOS_DumpJoysticks("HIDAPI=0");
 
-	SDL_Quit();
 	exit(0);
 }
 
-static void WebOS_Bootstrap(void) {
+/* psvita-style data dir: all game data (options.txt, texpacks/, texturecache/,
+   audio/, maps/, plugins/, client.log) is redirected into <exedir>/.config/ by
+   Platform_EncodePath, keeping the app folder itself clean. */
+static char webosDataDir[NATIVE_STR_LEN];
+static int  webosDataDirLen;
+
+static void WebOS_InitDataDir(void) {
+	char path[NATIVE_STR_LEN];
+	int i, len;
+	if (webosDataDirLen) return;
+
+	len = readlink("/proc/self/exe", path, NATIVE_STR_LEN - 1);
+	if (len <= 0) return;
+	path[len] = '\0';
+	/* trim filename at the end of the path */
+	for (i = len - 1; i >= 0; i--, len--) {
+		if (path[i] == '/') break;
+	}
+	if (len <= 1) return;
+	Mem_Copy(path + len, ".config/", sizeof(".config/"));
+	len += (int)sizeof(".config/") - 1;
+	path[len] = '\0';
+
+	mkdir(path, 0700);
+	Mem_Copy(webosDataDir, path, len + 1);
+	webosDataDirLen = len;
+}
+
+static void WebOS_Bootstrap(int argc, char** argv) {
 	struct stat st;
-	char sockpath[256];
+	char sockpath[256], logpath[NATIVE_STR_LEN];
 	const char* runtime_dir;
 	const char* logfile;
+	int i;
+
+	WebOS_InitDataDir();
 
 	if (!getenv("EGL_PLATFORM")) setenv("EGL_PLATFORM", "wayland", 0);
 	if (!getenv("XDG_RUNTIME_DIR")) setenv("XDG_RUNTIME_DIR", "/tmp/xdg", 0);
@@ -254,10 +282,17 @@ static void WebOS_Bootstrap(void) {
 
 	logfile = getenv("CC_LOG_FILE");
 	if (!logfile) logfile = "client.log";
-	freopen(logfile, "a", stdout);
-	freopen(logfile, "a", stderr);
+	if (webosDataDirLen) {
+		snprintf(logpath, sizeof(logpath), "%s%s", webosDataDir, logfile);
+		freopen(logpath, "a", stdout);
+		freopen(logpath, "a", stderr);
+	} else {
+		freopen(logfile, "a", stdout);
+		freopen(logfile, "a", stderr);
+	}
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	printf("logging to '%s'" _NL, logfile);
+	printf("logging to '%s'" _NL, webosDataDirLen ? logpath : logfile);
+	for (i = 0; i < argc; i++) printf("argv[%d]='%s'" _NL, i, argv[i]);
 
 	runtime_dir = getenv("XDG_RUNTIME_DIR");
 	if (runtime_dir && runtime_dir[0]) {
@@ -280,6 +315,10 @@ static void WebOS_Bootstrap(void) {
 
 	WebOS_SwitchProHandshake();
 
+	if (webosDataDirLen) {
+		snprintf(sockpath, sizeof(sockpath), "%scc_probe_joy", webosDataDir);
+		if (access(sockpath, F_OK) == 0) WebOS_ProbeJoysticks();
+	}
 	if (access("cc_probe_joy", F_OK) == 0) WebOS_ProbeJoysticks();
 }
 #endif
@@ -287,7 +326,7 @@ static void WebOS_Bootstrap(void) {
 int main(int argc, char** argv) {
 	cc_result res;
 #ifdef CC_BUILD_WEBOS
-	WebOS_Bootstrap();
+	WebOS_Bootstrap(argc, argv);
 #endif
 	SetupProgram(argc, argv);
 
@@ -483,6 +522,15 @@ void Process_Abort2(cc_result result, const char* raw_msg) {
 *#########################################################################################################################*/
 void Platform_EncodePath(cc_filepath* dst, const cc_string* path) {
 	char* str = dst->buffer;
+#if defined CC_BUILD_WEBOS
+	/* psvita-style: prefix relative paths with the data dir so all game data
+	   (options.txt, texpacks/, texturecache/, audio/, maps/, plugins/, client.log)
+	   is kept in <exedir>/.config/ instead of the app folder itself. */
+	if (webosDataDirLen && path->length > 0 && path->buffer[0] != '/') {
+		Mem_Copy(str, webosDataDir, webosDataDirLen);
+		str += webosDataDirLen;
+	}
+#endif
 	String_EncodeUtf8(str, path);
 }
 
@@ -1515,7 +1563,13 @@ const cc_string DynamicLib_Ext = String_FromConst(".so");
 
 void* DynamicLib_Load2(const cc_string* path) {
 	cc_filepath str;
+#if defined CC_BUILD_WEBOS
+	/* system library names must reach dlopen unmodified so the dynamic linker
+	   searches the default paths; the data dir prefix is for game data files */
+	String_EncodeUtf8(str.buffer, path);
+#else
 	Platform_EncodePath(&str, path);
+#endif
 	return dlopen(str.buffer, RTLD_NOW);
 }
 
@@ -1781,7 +1835,7 @@ int Platform_GetCommandLineArgs(int argc, STRING_REF char** argv, cc_string* arg
 }
 #else
 int Platform_GetCommandLineArgs(int argc, STRING_REF char** argv, cc_string* args) {
-	int i, count;
+	int i, count, numArgs;
 	argc--; argv++; /* skip executable path argument */
 	if (gameHasArgs) return GetGameArgs(args);
 
@@ -1795,6 +1849,7 @@ int Platform_GetCommandLineArgs(int argc, STRING_REF char** argv, cc_string* arg
 	#endif
 
 	count = min(argc, GAME_MAX_CMDARGS);
+	numArgs = 0;
 	for (i = 0; i < count; i++) 
 	{
 		/* -d[directory] argument used to change directory data is stored in */
@@ -1802,9 +1857,16 @@ int Platform_GetCommandLineArgs(int argc, STRING_REF char** argv, cc_string* arg
 			Process_Abort("-d argument no longer supported - cd to desired working directory instead");
 			continue;
 		}
-		args[i] = String_FromReadonly(argv[i]);
+#if defined CC_BUILD_WEBOS
+		/* The webOS app manager passes the appInfo JSON as a command line argument.
+		   Skip it so the launcher runs; the game fork (`ClassiCube <user>` etc) is
+		   still parsed normally. */
+		if (argv[i][0] == '{') continue;
+#endif
+		args[numArgs] = String_FromReadonly(argv[i]);
+		numArgs++;
 	}
-	return count;
+	return numArgs;
 }
 
 /* Avoid "ignoring return value of 'write' declared with attribute 'warn_unused_result'" warning */
