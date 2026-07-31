@@ -6,7 +6,7 @@ SDK_DIR ?= /run/media/1TB/Dev-Projects/Porting/Tools/native-toolchain-compiled/a
 STAGING_DIR ?= $(SDK_DIR)/arm-webos-linux-gnueabi/sysroot
 CROSS_PREFIX ?= $(SDK_DIR)/bin/arm-webos-linux-gnueabi-
 
-SOURCE_DIRS := src third_party/bearssl
+SOURCE_DIRS := src src/webos third_party/bearssl
 BUILD_DIR	:= build/webos
 
 CC := $(CROSS_PREFIX)gcc

@@ -37,8 +37,32 @@
 5. SDL `SDL_HINT_JOYSTICK_HIDAPI=0`: jailer blocks /dev/hidraw for hidapi, legacy evdev
    works. 8BitDo Switch Pro (057e:2009) needs the USB handshake `{0x80,0x02}` first
    (`WebOS_SwitchProHandshake`).
-6. Audio is NULL backend (webOS MFE crashes with std::bad_function_call otherwise, same
-   as sm64 `SM64_NOSOUND`).
+6. Audio was originally NULL backend (webOS MFE crashes with std::bad_function_call otherwise,
+   same as sm64 `SM64_NOSOUND`). Replaced with a real SDL2 backend (`src/webos/Audio_SDL.c`,
+   `CC_AUD_BACKEND_SDL`) - see "Audio" section below. `CC_NOSOUND` env var still forces
+   `AudioBackend_Init` to return false (game then auto-disables sounds+music).
+
+## Audio (SDL2 push-mode backend)
+- `src/webos/Audio_SDL.c`, selected via `DEFAULT_AUD_BACKEND CC_AUD_BACKEND_SDL` in `Core.h`.
+- Uses one `SDL_OpenAudioDevice` (native format, `want.samples=1024`, null callback) +
+  `SDL_QueueAudio`. TV stack confirmed working: PulseAudio (`/usr/bin/pulseaudio --system=1`,
+  `/run/pulse/native`) + ALSA (`/usr/lib/libasound.so.2`), `/dev/snd/controlC0,C1`.
+- Each `AudioContext` gets its own `SDL_AudioStream` (S16 source -> device format), so any
+  sample rate/channel count (music .ogg decodes to S16 in-tree, sounds from default.zip) plays.
+- A software mixer sums all active contexts into one S16 buffer (with clipping) and pushes it,
+  topped up to ~2048 device frames via `SDL_GetQueuedAudioSize`. Driven from
+  `Audio_QueueChunk`/`Audio_Poll` (music thread polls every ~10ms). Initial no-mixer version
+  queued each context into one FIFO, which made SFX play late/out-of-order and stall music.
+- Busy tracking (`Audio_Poll` inUse) is wall-clock: `pendingSamples` of source samples consumed
+  against a `startTick`, so `StreamContext_Update` (music refill) and `SoundContext_PollBusy`
+  (SFX pool reuse) work without hardware feedback.
+- Volume applied per-context at mix time (`ctx->volume`, 0-100). Contexts registered in a
+  global array; stream ops + registry guarded by `audioMutex` (music thread + main thread race).
+- `SDL_GetCurrentAudioDriver()` log line: must pass a `cc_string` to `Platform_Log1`'s `%s`
+  (`String_InitArray` + `String_AppendConst`), not a raw C string.
+- Confirmed working on tv-sala: music + dig/step SFX play correctly and in sync.
+- Traps: sysroot SDL2 2.30.12 headers name the stream-clear function `SDL_AudioStreamClear`
+  (not `SDL_ClearAudioStream`); runtime symbol matches.
 
 ## Data directory (.config) - psvita-style
 - ClassiCube's psvita port relocates all game data by prepending a fixed root path in
