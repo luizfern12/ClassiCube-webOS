@@ -9,7 +9,7 @@
 #include "Errors.h"
 #include <SDL2/SDL.h>
 #ifdef CC_BUILD_WEBOS
-#include <SDL2/SDL_webOS.h>
+#include "webos/webos.h"
 #endif
 
 static SDL_Window* win_handle;
@@ -59,13 +59,7 @@ static void Window_SDLFail(const char* place) {
 
 void Window_PreInit(void) {
 #ifdef CC_BUILD_WEBOS
-	SDL_SetHint(SDL_HINT_WEBOS_ACCESS_POLICY_KEYS_BACK, "true");
-	SDL_SetHint(SDL_HINT_WEBOS_ACCESS_POLICY_KEYS_EXIT, "true");
-	SDL_SetHint(SDL_HINT_WEBOS_CURSOR_SLEEP_TIME, "5000");
-	/* The webOS jailer blocks /dev/hidraw*, so SDL's hidapi joystick driver
-	enumerates nothing by default. Force the legacy (evdev) driver instead,
-	which works in the app sandbox and still yields gamecontroller mappings. */
-	SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0");
+	WebOS_PreSDLInit();
 #endif
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
 	DisplayInfo.CursorVisible = true;
@@ -97,10 +91,7 @@ static void ApplyIcon(void) {
 
 static void DoCreateWindow(int width, int height, int flags) {
 #ifdef CC_BUILD_WEBOS
-	/* TV apps run fullscreen at the panel's native resolution */
-	width  = DisplayInfo.Width;
-	height = DisplayInfo.Height;
-	flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+	WebOS_ApplyWindowSize(&width, &height, &flags);
 #endif
 	win_handle = SDL_CreateWindow(NULL, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, 
 					flags | SDL_WINDOW_RESIZABLE);
@@ -489,52 +480,21 @@ void Window_DisableRawMouse(void) {
 *--------------------------------------------------------Gamepads---------------------------------------------------------*
 *#########################################################################################################################*/
 #include "ExtMath.h"
-static SDL_GameController* controllers[INPUT_MAX_GAMEPADS];
+SDL_GameController* controllers[INPUT_MAX_GAMEPADS];
 
 void Gamepads_PreInit(void) { }
 
-/* Closes detached pads and opens any pad not already open (tracked by SDL
-   joystick instance ID). Picks up controllers hotplugged after launch. */
-static void Gamepads_ReopenPads(void) {
-	int i, slot;
-
-	for (slot = 0; slot < INPUT_MAX_GAMEPADS; slot++) {
-		if (controllers[slot] && !SDL_GameControllerGetAttached(controllers[slot])) {
-			SDL_GameControllerClose(controllers[slot]);
-			controllers[slot] = NULL;
-		}
-	}
-
-	for (i = 0; i < SDL_NumJoysticks(); i++) {
-		SDL_JoystickID instance;
-		cc_bool alreadyOpen;
-		if (!SDL_IsGameController(i)) continue;
-
-		instance = SDL_JoystickGetDeviceInstanceID(i);
-		alreadyOpen = false;
-		for (slot = 0; slot < INPUT_MAX_GAMEPADS; slot++) {
-			if (controllers[slot] &&
-				SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controllers[slot])) == instance) {
-				alreadyOpen = true; break;
-			}
-		}
-		if (alreadyOpen) continue;
-
-		for (slot = 0; slot < INPUT_MAX_GAMEPADS; slot++) {
-			if (controllers[slot]) continue;
-			controllers[slot] = SDL_GameControllerOpen(i);
-			if (controllers[slot]) break;
-		}
-	}
-}
-
 void Gamepads_Init(void) {
 #ifdef CC_BUILD_WEBOS
-	/* Extra mappings for pads not in the bundled SDL's built-in database.
-	   Runs after the cwd has been switched to the app dir. */
-	SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt");
+	WebOS_LoadGamepadMappings();
+	WebOS_ReopenGamepads();
+#else
+	for (int i = 0, j = 0; i < SDL_NumJoysticks() && j < INPUT_MAX_GAMEPADS; i++) 
+	{
+		if (!SDL_IsGameController(i)) continue;
+		controllers[j++] = SDL_GameControllerOpen(i);
+	}
 #endif
-	Gamepads_ReopenPads();
 }
 
 static void ProcessGamepadButtons(int port, SDL_GameController* gp) {
@@ -573,7 +533,7 @@ static void ProcessJoystick(int port, SDL_GameController* gp, int axis, float de
 
 void Gamepads_Process(float delta) {
 #ifdef CC_BUILD_WEBOS
-	Gamepads_ReopenPads();
+	WebOS_ReopenGamepads();
 #endif
 	for (int i = 0; i < INPUT_MAX_GAMEPADS; i++)
 	{

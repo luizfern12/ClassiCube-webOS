@@ -73,12 +73,24 @@
   `<appdir>/.config/`. Bootstrap logfile + `cc_probe_joy` marker resolved into that dir too.
 
 ## Key code locations
-- `src/Platform_Posix.c`: `WebOS_Bootstrap()`, `WebOS_SwitchProHandshake()`,
-  `WebOS_ProbeJoysticks()`, `WebOS_DumpJoysticks()`, `Platform_EncodePath()` (data dir
-  prefix), `main()` (argc=1 fix).
-- `src/Window_SDL2.c`: webOS hints, fullscreen native res, `Gamepads_ReopenPads()` hotplug.
+- All webOS-specific logic lives in `src/webos/` (built via `SOURCE_DIRS` in
+  `misc/makefiles/webos.mk`, following the `src/<platform>/` convention):
+  - `src/webos/Platform_WebOS.c`: `WebOS_Bootstrap()`, `WebOS_SwitchProHandshake()`,
+    `WebOS_InitDataDir()`, joystick probe (`WebOS_ProbeJoysticks`/`DumpJoysticks`/
+    `ProbeLiveRead`), `Platform_EncodePath()` (data dir prefix), `DynamicLib_Load2()`,
+    `Platform_GetCommandLineArgs()` (JSON arg skip).
+  - `src/webos/Window_WebOS.c`: `WebOS_PreSDLInit()` (hints), `WebOS_ApplyWindowSize()`
+    (fullscreen native res), `WebOS_LoadGamepadMappings()`, `WebOS_ReopenGamepads()`
+    (hotplug, owns the shared `controllers[]` slots from `Window_SDL2.c`).
+  - `src/webos/Audio_SDL.c`: SDL2 push-mode audio backend.
+- Upstream sources only carry thin `#ifdef CC_BUILD_WEBOS` hooks:
+  `src/Platform_Posix.c` (`WebOS_Bootstrap` in `main()`, plus `/* implemented in
+  Platform_WebOS.c */` guards for the 3 overridden functions), `src/Window_SDL2.c`
+  (the 4 `WebOS_*()` calls above).
 - `src/Core.h`: `CC_BUILD_WEBOS` platform section (net=BUILTIN, ssl=BEARSSL,
-  crt=OPENSSL, aud=NULL, win=SDL2, GLES, gfx=GL2).
+  crt=OPENSSL, aud=SDL, win=SDL2, GLES, gfx=GL2).
+- `src/Graphics_GL2.c`: `convert_rgba = true` override (GLES framebuffer pixels are
+  already RGBA, skip the BGR conversion).
 - `src/Launcher.c` + `src/LScreens.c` + `src/Resources.c`: launcher resource flow -
   `Resources_CheckExistence()` (checks `texpacks/classicube.zip`), `CheckResourcesScreen`
   ("download required resources?"), `FetchResourcesScreen` (calls `Fetcher_Run()` which
@@ -110,9 +122,9 @@
 - PS4 corrected map: `leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a2,righttrigger:a5`,
   buttons `a:b0,b:b1,x:b2,y:b3`, dpad `b11-14`, `l1:b9,r1:b10,l3:b7,r3:b8,start:b6,back:b4`,
   `guide:b5,touchpad:b15`. Switch Pro map (from sm64ex): dpad via hat `h0.1/2/4/8`.
-- `WebOS_InitDataDir` now chdir()s to the app dir so `Gamepads_Init`'s relative
-  `gamecontrollerdb.txt` load (`src/Window_SDL2.c`) always finds the file regardless of the
-  webOS launch cwd.
+- `WebOS_InitDataDir` now chdir()s to the app dir so `WebOS_LoadGamepadMappings`'s
+  relative `gamecontrollerdb.txt` load (`src/webos/Window_WebOS.c`) always finds the
+  file regardless of the webOS launch cwd.
 - Debug: touch `cc_probe_joy` in the app dir. Probe now: dumps devices/HIDAPI=0 mapping,
   loads the db file, re-dumps ("after file load") to prove override, then `WebOS_ProbeLiveRead`
   waits up to 120s for a button press and records 30s of raw+mapped state.
