@@ -67,3 +67,28 @@
 - `../RetroArch`: downloads work on webOS; data in `$HOME/.config/retroarch/` (see
   `file_path_special.c`).
 - ClassiCube `src/psvita/Platform_PSVita.c`: `Platform_EncodePath` root-path prefix pattern.
+
+## Gamepad / SDL controller mappings (confirmed on tv-sala)
+- The webOS SDL reports device GUIDs that embed the device-name CRC (`03008fe5...` PS4,
+  `03007755...` Switch Pro) instead of the stock SDL GUID scheme, so standard
+  gamecontrollerdb.txt GUID entries never match; entries for these devices MUST use the
+  webOS GUID.
+- Baked-in webOS mappings are **wrong for the PS4** (off-by-one on axes): it maps
+  `lefttrigger:a4, rightx:a2, righty:a3`. `/proc/bus/input/devices` shows the PS4 exposes
+  `ABS=X,Y,Z,RX,RY,RZ` (L2=raw2, right-stick X=raw3, right-stick Y=raw4, R2=raw5), so the
+  baked-in map points the right stick at L2/right-stick-X. Raw axes 4/5 also rest at
+  -32768 with no input, so triggers (mapped to 3/4 by the baked-in map) never fire and the
+  camera drifts/spins. Root cause of "swapped analogs / drift / slow sensitivity".
+- `webos/gamecontrollerdb.txt` carries corrected mappings and **does override** the baked-in
+  maps (confirmed: after `SDL_GameControllerAddMappingsFromFile` the reported mapping for
+  both controllers matches the file entries). The call returns `0` even when it applies, so
+  don't rely on the return value.
+- PS4 corrected map: `leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a2,righttrigger:a5`,
+  buttons `a:b0,b:b1,x:b2,y:b3`, dpad `b11-14`, `l1:b9,r1:b10,l3:b7,r3:b8,start:b6,back:b4`,
+  `guide:b5,touchpad:b15`. Switch Pro map (from sm64ex): dpad via hat `h0.1/2/4/8`.
+- `WebOS_InitDataDir` now chdir()s to the app dir so `Gamepads_Init`'s relative
+  `gamecontrollerdb.txt` load (`src/Window_SDL2.c`) always finds the file regardless of the
+  webOS launch cwd.
+- Debug: touch `cc_probe_joy` in the app dir. Probe now: dumps devices/HIDAPI=0 mapping,
+  loads the db file, re-dumps ("after file load") to prove override, then `WebOS_ProbeLiveRead`
+  waits up to 120s for a button press and records 30s of raw+mapped state.

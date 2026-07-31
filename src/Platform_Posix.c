@@ -178,26 +178,70 @@ static void WebOS_DumpJoysticks(const char* label) {
 			if (map) SDL_free(map);
 		}
 	}
+}
 
-	gc = NULL;
+/* Interactive probe step: open the first game controller, wait for a button
+   press (up to 120s), then record 30s of raw + mapped axis/button changes. */
+static void WebOS_ProbeLiveRead(void) {
+	SDL_GameController* gc = NULL;
+	int i;
 	for (i = 0; i < SDL_NumJoysticks(); i++) {
 		if (!SDL_IsGameController(i)) continue;
 		gc = SDL_GameControllerOpen(i);
 		if (gc) break;
 	}
 	if (gc) {
-		printf("--- live read controller [%d] (%s) for 4s, press buttons ---" _NL,
+		SDL_Joystick* js = SDL_GameControllerGetJoystick(gc);
+		int16_t rawA[16] = {0}, mapA[SDL_CONTROLLER_AXIS_MAX] = {0};
+		cc_uint8 rawB[32] = {0}, mapB[SDL_CONTROLLER_BUTTON_MAX] = {0};
+		int nAxes = SDL_JoystickNumAxes(js), nBtns = SDL_JoystickNumButtons(js);
+		if (nAxes > 16) nAxes = 16;
+		if (nBtns > 32) nBtns = 32;
+		printf("--- live read controller [%d] (%s), press any button to start recording ---" _NL,
 			i, SDL_GameControllerName(gc) ? SDL_GameControllerName(gc) : "?");
+		printf("    RAW axes/buttons = physical device, MAPPED = via gamecontroller mapping" _NL);
+		{
+			int b;
+			cc_uint32 tw0 = SDL_GetTicks();
+			while (SDL_GetTicks() - tw0 < 120000) {
+				int pressed = 0;
+				SDL_GameControllerUpdate();
+				for (b = 0; b < nBtns; b++)
+					if (SDL_JoystickGetButton(js, b)) { pressed = 1; break; }
+				if (pressed) break;
+				SDL_Delay(16);
+			}
+		}
+		printf("    recording for 30s now..." _NL);
 		cc_uint32 t0 = SDL_GetTicks();
-		while (SDL_GetTicks() - t0 < 4000) {
+		while (SDL_GetTicks() - t0 < 30000) {
 			int a, b;
 			SDL_GameControllerUpdate();
+			for (a = 0; a < nAxes; a++) {
+				int16_t v = SDL_JoystickGetAxis(js, a);
+				if (Math_AbsI(v) <= 2000 && rawA[a] == 0) continue;
+				if (v == rawA[a]) continue;
+				printf("  RAW axis %d = %d%s" _NL, a, v, (Math_AbsI(v) > 2000) ? "" : " (centered)");
+				rawA[a] = v;
+			}
 			for (a = 0; a < SDL_CONTROLLER_AXIS_MAX; a++) {
 				int16_t v = SDL_GameControllerGetAxis(gc, a);
-				if (v > 4000 || v < -4000) printf("  axis %d = %d" _NL, a, v);
+				if (v == mapA[a]) continue;
+				printf("  MAP axis %d = %d" _NL, a, v);
+				mapA[a] = v;
 			}
-			for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++)
-				if (SDL_GameControllerGetButton(gc, b)) printf("  button %d pressed" _NL, b);
+			for (b = 0; b < nBtns; b++) {
+				int v = SDL_JoystickGetButton(js, b);
+				if (v == rawB[b]) continue;
+				printf("  RAW button %d %s" _NL, b, v ? "pressed" : "released");
+				rawB[b] = v;
+			}
+			for (b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {
+				int v = SDL_GameControllerGetButton(gc, b);
+				if (v == mapB[b]) continue;
+				printf("  MAP button %d %s" _NL, b, v ? "pressed" : "released");
+				mapB[b] = v;
+			}
 			SDL_Delay(16);
 		}
 		SDL_GameControllerClose(gc);
@@ -236,6 +280,26 @@ static void WebOS_ProbeJoysticks(void) {
 		printf("SDL init failed: %s" _NL, SDL_GetError());
 	WebOS_DumpJoysticks("HIDAPI=0");
 
+	/* Show whether our gamecontrollerdb.txt can override the baked-in mappings */
+	{
+		char dbPath[256], exe[NATIVE_STR_LEN];
+		int l = readlink("/proc/self/exe", exe, NATIVE_STR_LEN - 1), i;
+		if (l <= 0) { printf("readlink /proc/self/exe failed" _NL); }
+		else {
+			exe[l] = '\0';
+			printf("probe exe raw: '%s' (len %d)" _NL, exe, l);
+			for (i = l - 1; i >= 0; i--) if (exe[i] == '/') break;
+			exe[i] = '\0';
+			snprintf(dbPath, sizeof(dbPath), "%s/gamecontrollerdb.txt", exe);
+			printf("probe dbPath: '%s'" _NL, dbPath);
+			int loaded = SDL_GameControllerAddMappingsFromFile(dbPath);
+			printf("loaded %d mappings from '%s'" _NL, loaded, dbPath);
+		}
+	}
+	WebOS_DumpJoysticks("after file load");
+
+	WebOS_ProbeLiveRead();
+
 	exit(0);
 }
 
@@ -258,6 +322,9 @@ static void WebOS_InitDataDir(void) {
 		if (path[i] == '/') break;
 	}
 	if (len <= 1) return;
+	path[len] = '\0';
+	/* make the app dir the cwd so relative paths (gamecontrollerdb.txt) work */
+	chdir(path);
 	Mem_Copy(path + len, ".config/", sizeof(".config/"));
 	len += (int)sizeof(".config/") - 1;
 	path[len] = '\0';

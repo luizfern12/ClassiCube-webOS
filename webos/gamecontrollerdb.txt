@@ -1,6 +1,7 @@
 # SDL2 game controller mappings for ClassiCube webOS.
-# Adapted from SDL's bundled database; SDL 2.0.5-compatible (no misc1/hint
-# fields) and platform-agnostic (no platform: field, webOS SDL may not
-# report "Linux").
-030000007e0500000920000011010000,Nintendo Switch Pro Controller,a:b0,b:b1,back:b9,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b11,leftshoulder:b5,leftstick:b12,lefttrigger:b7,leftx:a0,lefty:a1,rightshoulder:b6,rightstick:b13,righttrigger:b8,rightx:a2,righty:a3,start:b10,x:b3,y:b2,
-030000004c050000c405000011810000,Sony DualShock 4,a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,start:b9,x:b0,y:b3,
+# Switch Pro layout from sm64ex-lgtv (proven on this TV).
+# GUIDs are the ones the bundled webOS SDL actually reports for the
+# devices (they embed the device name CRC, unlike the stock SDL GUIDs),
+# so these entries override the baked-in webOS mappings.
+030077557e0500000920000000026803,Nintendo Switch Pro Controller,a:b0,b:b1,back:b9,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b11,leftshoulder:b5,leftstick:b12,lefttrigger:b7,leftx:a0,lefty:a1,rightshoulder:b6,rightstick:b13,righttrigger:b8,rightx:a2,righty:a3,start:b10,x:b3,y:b2,platform:webOS,
+03008fe54c050000cc09000000016800,PS4 Controller,a:b0,b:b1,back:b4,dpdown:b12,dpleft:b13,dpright:b14,dpup:b11,guide:b5,leftshoulder:b9,leftstick:b7,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b10,rightstick:b8,righttrigger:a5,rightx:a3,righty:a4,start:b6,x:b2,y:b3,touchpad:b15,platform:webOS,
